@@ -52,6 +52,39 @@ class ScanResponse(BaseModel):
     metrics: ScanMetricsSchema
 
 
+class FileChangeSchema(BaseModel):
+    """Schema representing an individual file change in a ChangeSet."""
+
+    path: str
+    change_type: str
+    old_path: Optional[str] = None
+    old_content_hash: Optional[str] = None
+    new_content_hash: Optional[str] = None
+    size_bytes: Optional[int] = None
+    mtime: Optional[float] = None
+
+
+class ChangeSetSchema(BaseModel):
+    """Schema representing a batch of file changes."""
+
+    changes: List[FileChangeSchema] = Field(default_factory=list)
+    detected_at: Optional[str] = None
+    detection_source: str
+    is_empty: bool
+
+
+class IncrementalScanResponse(BaseModel):
+    """Response returned by incremental scanner execution."""
+
+    project_id: str
+    canonical_root: str
+    symbols_db_path: str
+    change_set: ChangeSetSchema
+    metrics: ScanMetricsSchema
+    reconciliation_report: Optional[Dict[str, Any]] = None
+
+
+
 class CodeBrainStatsResponse(BaseModel):
     """Entity count stats for Code Brain."""
 

@@ -164,3 +164,36 @@ class CodeBrainException(ContinuumBaseException):
             details=details,
         )
 
+
+class ProjectBrainException(ContinuumBaseException):
+    """Raised when Project Brain persistence, parsing, or retrieval encounters an error."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(
+            message=message,
+            code="PROJECT_BRAIN_ERROR",
+            details=details,
+        )
+
+
+class GovernanceViolationException(ProjectBrainException):
+    """Raised when an operation violates artifact ownership (e.g. attempting to overwrite HUMAN_AUTHORED)."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(
+            message=message,
+            details=details,
+        )
+        self.code = "GOVERNANCE_VIOLATION"
+
+
+class TechnologyBrainException(ContinuumBaseException):
+    """Raised when Technology Brain persistence or retrieval encounters an error."""
+
+    def __init__(self, message: str, details: Optional[Dict[str, Any]] = None) -> None:
+        super().__init__(
+            message=message,
+            code="TECHNOLOGY_BRAIN_ERROR",
+            details=details,
+        )
+

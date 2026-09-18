@@ -230,3 +230,98 @@ class ScanResult:
             "parse_results": [p.to_dict() for p in self.parse_results],
             "metrics": self.metrics.to_dict(),
         }
+
+
+class ChangeType(str, Enum):
+    """Categorization of workspace file mutations for incremental intelligence."""
+
+    ADDED = "ADDED"
+    MODIFIED = "MODIFIED"
+    DELETED = "DELETED"
+    RENAMED = "RENAMED"
+
+
+@dataclass
+class FileChange:
+    """Normalized file-level mutation representation independent of Git, watchdog, or UI."""
+
+    path: str
+    change_type: ChangeType
+    old_path: Optional[str] = None
+    old_content_hash: Optional[str] = None
+    new_content_hash: Optional[str] = None
+    size_bytes: Optional[int] = None
+    mtime: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "path": self.path,
+            "change_type": self.change_type.value,
+            "old_path": self.old_path,
+            "old_content_hash": self.old_content_hash,
+            "new_content_hash": self.new_content_hash,
+            "size_bytes": self.size_bytes,
+            "mtime": self.mtime,
+        }
+
+
+@dataclass
+class ChangeSet:
+    """Aggregate set of detected file mutations across a repository scan boundary."""
+
+    changes: List[FileChange] = field(default_factory=list)
+    detected_at: Optional[str] = None
+    detection_source: str = "FILESYSTEM_CONTENT_HASH"
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self.changes) == 0
+
+    @property
+    def added_paths(self) -> List[str]:
+        return [c.path for c in self.changes if c.change_type == ChangeType.ADDED]
+
+    @property
+    def modified_paths(self) -> List[str]:
+        return [c.path for c in self.changes if c.change_type == ChangeType.MODIFIED]
+
+    @property
+    def deleted_paths(self) -> List[str]:
+        return [c.path for c in self.changes if c.change_type == ChangeType.DELETED]
+
+    @property
+    def renamed_pairs(self) -> List[tuple[str, str]]:
+        return [(c.old_path, c.path) for c in self.changes if c.change_type == ChangeType.RENAMED and c.old_path]
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "changes": [c.to_dict() for c in self.changes],
+            "detected_at": self.detected_at,
+            "detection_source": self.detection_source,
+            "is_empty": self.is_empty,
+        }
+
+
+@dataclass
+class IncrementalScanResult:
+    """Outcome and metrics of a synchronous incremental scan run."""
+
+    project_id: str
+    canonical_root: str
+    symbols_db_path: str
+    change_set: ChangeSet
+    parse_results: List[ParseResult]
+    metrics: ScanMetrics
+    reconciliation_report: Optional[Dict[str, Any]] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "project_id": self.project_id,
+            "canonical_root": self.canonical_root,
+            "symbols_db_path": self.symbols_db_path,
+            "change_set": self.change_set.to_dict(),
+            "parse_results": [p.to_dict() for p in self.parse_results],
+            "metrics": self.metrics.to_dict(),
+            "reconciliation_report": self.reconciliation_report,
+        }
+

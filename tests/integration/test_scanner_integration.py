@@ -145,3 +145,25 @@ def test_scanner_and_code_brain_api(test_client: TestClient, complex_workspace: 
     assert rel_resp.status_code == 200
     rels = rel_resp.json()
     assert len(rels) > 0
+
+    # 5. Incremental scan endpoint test
+    # Without any changes
+    inc_resp1 = test_client.post(f"/api/v1/scanner/scan/incremental?path={complex_workspace}")
+    assert inc_resp1.status_code == 200
+    inc_data1 = inc_resp1.json()
+    assert inc_data1["change_set"]["is_empty"] is True
+    assert len(inc_data1["change_set"]["changes"]) == 0
+
+    # Mutate a file
+    broken_py = complex_workspace / "broken.py"
+    broken_py.write_text("def fixed_func():\n    return 'fixed'\n", encoding="utf-8")
+
+    inc_resp2 = test_client.post(f"/api/v1/scanner/scan/incremental?path={complex_workspace}")
+    assert inc_resp2.status_code == 200
+    inc_data2 = inc_resp2.json()
+    assert inc_data2["change_set"]["is_empty"] is False
+    assert len(inc_data2["change_set"]["changes"]) == 1
+    assert inc_data2["change_set"]["changes"][0]["path"] == "broken.py"
+    assert inc_data2["change_set"]["changes"][0]["change_type"] == "MODIFIED"
+    assert inc_data2["metrics"]["files_parsed"] == 1
+

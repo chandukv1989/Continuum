@@ -134,6 +134,135 @@ class CodeBrainRepository:
                     rel_params[i : i + batch_size],
                 )
 
+    def delete_file_artifacts(self, file_path: str) -> None:
+        """Surgically delete a single file and cascade all its symbols and relationships.
+
+        Transactional guarantee: executes in an atomic transaction.
+        """
+        with self.db.transaction() as conn:
+            conn.execute("DELETE FROM files WHERE path = ?;", (file_path,))
+
+    def delete_files_artifacts(self, file_paths: List[str]) -> None:
+        """Surgically delete multiple files and cascade all their symbols and relationships."""
+        if not file_paths:
+            return
+        with self.db.transaction() as conn:
+            for path in file_paths:
+                conn.execute("DELETE FROM files WHERE path = ?;", (path,))
+
+    def apply_incremental_scan(
+        self,
+        deleted_paths: List[str],
+        scanned_files: List[DiscoveredFile],
+        parse_results: List[ParseResult],
+        batch_size: int = 500,
+    ) -> None:
+        """Atomically apply an incremental delta to Code Brain.
+
+        1. Deletes files in deleted_paths (cascading to their symbols and relationships).
+        2. Deletes existing records for any files in scanned_files (updating them).
+        3. Inserts updated files, symbols, and relationships.
+        All steps execute within a single atomic SQLite transaction. If any step fails,
+        the entire transaction rolls back preserving the previous consistent state.
+        """
+        all_symbols: List[SymbolRecord] = []
+        all_relationships: List[RelationshipRecord] = []
+
+        for pr in parse_results:
+            all_symbols.extend(pr.symbols)
+            all_relationships.extend(pr.relationships)
+
+        with self.db.transaction() as conn:
+            # 1. Delete explicit deleted files
+            for p in deleted_paths:
+                conn.execute("DELETE FROM files WHERE path = ?;", (p,))
+
+            # 2. Delete existing records for files being added/modified (upsert semantics)
+            for f in scanned_files:
+                conn.execute("DELETE FROM files WHERE path = ?;", (f.relative_path,))
+
+            # 3. Insert updated file records
+            file_params = [
+                (
+                    f.relative_path,
+                    f.canonical_path.as_posix(),
+                    f.size_bytes,
+                    f.content_hash,
+                    f.mtime,
+                    f.language.value,
+                    f.status.value,
+                )
+                for f in scanned_files
+            ]
+            for i in range(0, len(file_params), batch_size):
+                conn.executemany(
+                    """
+                    INSERT INTO files (
+                        path, canonical_path, size_bytes, content_hash, mtime, language, parse_status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    file_params[i : i + batch_size],
+                )
+
+            # 4. Insert updated symbols (root symbols first, then children for parent_id FK)
+            root_symbols = [s for s in all_symbols if not s.parent_symbol_id]
+            child_symbols = [s for s in all_symbols if s.parent_symbol_id]
+            ordered_symbols = root_symbols + child_symbols
+
+            symbol_params = [
+                (
+                    s.id,
+                    s.file_path,
+                    s.name,
+                    s.qualified_name,
+                    s.kind.value,
+                    s.language.value,
+                    s.parent_symbol_id,
+                    s.start_line,
+                    s.start_column,
+                    s.end_line,
+                    s.end_column,
+                    1 if s.is_exported else 0,
+                    s.docstring,
+                )
+                for s in ordered_symbols
+            ]
+            for i in range(0, len(symbol_params), batch_size):
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO symbols (
+                        id, file_path, name, qualified_name, kind, language, parent_id,
+                        start_line, start_col, end_line, end_col, is_exported, docstring
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    symbol_params[i : i + batch_size],
+                )
+
+            # 5. Insert updated relationships
+            rel_params = [
+                (
+                    r.id,
+                    r.source_id,
+                    r.target_name,
+                    r.target_id,
+                    r.relationship_type.value,
+                    r.evidence_type.value,
+                    r.file_path,
+                    r.line_number,
+                )
+                for r in all_relationships
+            ]
+            for i in range(0, len(rel_params), batch_size):
+                conn.executemany(
+                    """
+                    INSERT OR REPLACE INTO relationships (
+                        id, source_id, target_name, target_id, relationship_type,
+                        evidence_type, file_path, line_number
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    rel_params[i : i + batch_size],
+                )
+
     # -------------------------------------------------------------------------
     # QUERY METHODS
     # -------------------------------------------------------------------------
