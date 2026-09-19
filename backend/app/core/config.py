@@ -58,6 +58,17 @@ class ContinuumSettings(BaseSettings):
         default=500, ge=1, le=10000, description="Batch size for database writes"
     )
 
+    # Watcher configuration (Phase 4.2)
+    watcher_enabled: bool = Field(
+        default=False, description="Enable automatic filesystem observation"
+    )
+    watcher_debounce_seconds: float = Field(
+        default=0.3, ge=0.05, le=5.0, description="Debounce window in seconds for coalescing filesystem events"
+    )
+    watcher_max_pending_events: int = Field(
+        default=1000, ge=10, le=50000, description="Maximum bounded pending events before forcing a coalesce flush"
+    )
+
     # Optional internal token/secret for API or internal communication
     api_secret: Optional[SecretStr] = Field(default=None, description="Optional internal authorization token")
 
@@ -96,6 +107,9 @@ class ContinuumSettings(BaseSettings):
             "max_file_size_bytes": self.max_file_size_bytes,
             "scanner_ignore_patterns": self.scanner_ignore_patterns,
             "scanner_batch_size": self.scanner_batch_size,
+            "watcher_enabled": self.watcher_enabled,
+            "watcher_debounce_seconds": self.watcher_debounce_seconds,
+            "watcher_max_pending_events": self.watcher_max_pending_events,
             "has_api_secret": self.api_secret is not None,
         }
 

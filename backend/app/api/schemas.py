@@ -28,6 +28,9 @@ class ConfigResponse(BaseModel):
     max_file_size_bytes: int = 2 * 1024 * 1024
     scanner_ignore_patterns: List[str] = Field(default_factory=list)
     scanner_batch_size: int = 500
+    watcher_enabled: bool = False
+    watcher_debounce_seconds: float = 0.3
+    watcher_max_pending_events: int = 1000
 
 
 class ScanMetricsSchema(BaseModel):
@@ -166,3 +169,20 @@ class ErrorResponse(BaseModel):
     error: str
     message: str
     details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WatcherStatusResponse(BaseModel):
+    """Filesystem watcher runtime status schema."""
+
+    is_running: bool
+    is_scanning: bool
+    project_id: str
+    workspace_root: str
+    pending_paths_count: int = 0
+    total_events_received: int = 0
+    total_batches_processed: int = 0
+    total_scans_triggered: int = 0
+    total_scans_failed: int = 0
+    last_event_timestamp: Optional[float] = None
+    last_scan_timestamp: Optional[float] = None
+    last_error: Optional[str] = None

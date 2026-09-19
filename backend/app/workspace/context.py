@@ -37,6 +37,16 @@ class WorkspaceContext:
     security: SecurityManager
 
     @property
+    def project_id(self) -> str:
+        """Stable project identifier."""
+        return self.identity.project_id
+
+    @property
+    def repository_root(self) -> Path:
+        """Canonical repository root path."""
+        return self.canonical_root
+
+    @property
     def project_brain_dir(self) -> Path:
         """Path to portable Project Brain directory (<repo>/.continuum/)."""
         return self.canonical_root / ".continuum"

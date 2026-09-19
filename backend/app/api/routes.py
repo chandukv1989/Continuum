@@ -16,6 +16,7 @@ from backend.app.api.schemas import (
     ScanMetricsSchema,
     ScanResponse,
     SymbolSchema,
+    WatcherStatusResponse,
     WorkspaceResponse,
 )
 from backend.app.code_brain.repository import CodeBrainRepository
@@ -389,4 +390,119 @@ async def get_technology(
     """Retrieve a specific universal technology concept by ID."""
     repo = TechnologyBrainRepository(settings.technology_dir)
     return repo.get_technology(tech_id=tech_id)
+
+
+# --------------------------------------------------------------------------
+# Filesystem Watcher Endpoints (Phase 4.2)
+# --------------------------------------------------------------------------
+import threading
+from backend.app.watcher.service import FilesystemWatcherService
+
+_active_watchers: dict[str, FilesystemWatcherService] = {}
+_watchers_lock = threading.Lock()
+
+
+def _get_or_create_watcher(
+    context: WorkspaceContext,
+    settings: ContinuumSettings,
+) -> FilesystemWatcherService:
+    root_str = context.canonical_root
+    with _watchers_lock:
+        if root_str not in _active_watchers:
+            code_brain_repo = CodeBrainRepository(context.code_brain_db_path)
+            scanner = IncrementalRepositoryScanner(
+                context=context,
+                code_brain_repo=code_brain_repo,
+            )
+            service = FilesystemWatcherService(
+                context=context,
+                scanner=scanner,
+                settings=settings,
+            )
+            _active_watchers[root_str] = service
+        return _active_watchers[root_str]
+
+
+@router.get("/api/v1/watcher/status", response_model=WatcherStatusResponse, tags=["Watcher"])
+async def get_watcher_status(
+    path: Optional[str] = Query(default=None, description="Workspace path"),
+    settings: ContinuumSettings = Depends(get_settings),
+) -> WatcherStatusResponse:
+    """Get current status of filesystem watcher for workspace."""
+    target_path = path or "."
+    context = WorkspaceContext.create(workspace_path=target_path, config=settings)
+    root_str = context.canonical_root
+    with _watchers_lock:
+        service = _active_watchers.get(root_str)
+
+    if service:
+        status = service.get_status()
+        return WatcherStatusResponse(**status.to_dict())
+    else:
+        return WatcherStatusResponse(
+            is_running=False,
+            is_scanning=False,
+            project_id=context.project_id,
+            workspace_root=context.canonical_root,
+        )
+
+
+@router.post("/api/v1/watcher/start", response_model=WatcherStatusResponse, tags=["Watcher"])
+async def start_watcher(
+    path: Optional[str] = Query(default=None, description="Workspace path"),
+    settings: ContinuumSettings = Depends(get_settings),
+) -> WatcherStatusResponse:
+    """Start filesystem observation for the specified workspace."""
+    target_path = path or "."
+    context = WorkspaceContext.create(workspace_path=target_path, config=settings)
+    service = _get_or_create_watcher(context, settings)
+    service.start()
+    return WatcherStatusResponse(**service.get_status().to_dict())
+
+
+@router.post("/api/v1/watcher/stop", response_model=WatcherStatusResponse, tags=["Watcher"])
+async def stop_watcher(
+    path: Optional[str] = Query(default=None, description="Workspace path"),
+    settings: ContinuumSettings = Depends(get_settings),
+) -> WatcherStatusResponse:
+    """Stop filesystem observation for the specified workspace."""
+    target_path = path or "."
+    context = WorkspaceContext.create(workspace_path=target_path, config=settings)
+    root_str = context.canonical_root
+    with _watchers_lock:
+        service = _active_watchers.get(root_str)
+
+    if service:
+        service.stop()
+        return WatcherStatusResponse(**service.get_status().to_dict())
+    else:
+        return WatcherStatusResponse(
+            is_running=False,
+            is_scanning=False,
+            project_id=context.project_id,
+            workspace_root=context.canonical_root,
+        )
+
+
+@router.post("/api/v1/watcher/flush", tags=["Watcher"])
+async def flush_watcher(
+    path: Optional[str] = Query(default=None, description="Workspace path"),
+    settings: ContinuumSettings = Depends(get_settings),
+):
+    """Flush pending events in watcher and trigger incremental scan."""
+    target_path = path or "."
+    context = WorkspaceContext.create(workspace_path=target_path, config=settings)
+    root_str = context.canonical_root
+    with _watchers_lock:
+        service = _active_watchers.get(root_str)
+
+    if service:
+        result = service.flush_and_scan()
+        return {
+            "status": "flushed",
+            "scan_triggered": result is not None,
+            "changes_detected": len(result.change_set.changes) if result else 0,
+        }
+    else:
+        return {"status": "watcher_not_active", "scan_triggered": False}
 
